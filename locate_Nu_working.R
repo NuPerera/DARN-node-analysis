@@ -60,6 +60,7 @@ all_data <- load_data(infile)
 beep_data <- all_data[[1]][[1]]
 beep_data <- beep_data %>% 
   filter (!is.na(NodeId))
+saveRDS(beep_data,file = "./beep_data.rds" )
 
 ###looking for a file with the column names NodeId, lat, lng IN THAT ORDER
 nodes <- node_file(all_data[[2]][[1]])
@@ -150,18 +151,8 @@ head(resampled)
 str(resampled)
 
 datetime1 <- as.POSIXct("2021-01-22 14:45:23", tz="UTC")
-
-
-#getSunTimes(timeUTC=datetime1, lat = 36.4, lon = -102.5)
-#actbud.sub<- resampled %>%
-  #mutate(getSunTimes(.))%>%
-  #collect()%>%
-  #as.data.frame()
-
 actbud.sub<-resampled%>%
   mutate(ts=as.numeric(freq))
-
-
 
 #Time to sunriseset
 actbud.sub <- actbud.sub %>%
@@ -175,26 +166,16 @@ actbud.sub <- actbud.sub %>%
 str(actbud.sub)
 write.csv(actbud.sub,file = "./actbud.sub.csv" )
 
-### Extract the time of day for each detection ###
-
 #Time since sunrise
-hist(actbud.sub$ts_since_rise[ !actbud.sub$ts_since_rise>12 ], breaks = 24)
-#hist(actbud.subs$ts_since_rise[ !actbud.sub$ts_since_rise>12 ], breaks = 24) #subset
+hist(actbud.sub$ts_since_rise[ !actbud.sub$ts_since_rise>12 ], breaks = 24, xlab = "Time since sunrise (h)", 
+     ylab = "Frequency", cex.axis=1.5,cex.lab=1.5,  main = "" )
 
 #Time until sunset
-hist(actbud.sub$ts_to_set[ !actbud.sub$ts_to_set>12 ], breaks = 24)
-#hist(angulated.tags$ts_to_set[ !angulated.tags$ts_to_set>12 ], breaks = 24) #subset
+hist(actbud.sub$ts_to_set[ !actbud.sub$ts_to_set>12 ], breaks = 24, xlab = "Time till sunset (h)", 
+     ylab = "Frequency", cex.axis=1.5,cex.lab=1.5,  main = "" )
 
 hist(actbud.sub$ts_since_rise[!actbud.sub$TagId == 61780778], breaks =24)
 plot(actbud.sub$ts_since_rise,actbud.sub$beep_count)
-
-
-#rqfit <- rq(ts_since_rise ~ n, data = actbud.sub)
-#summary(rqfit)
-
-#multi.rqfit <- rq(ts_since_rise ~ n, data = angulated.tags, tau = seq(0, 1, by = 0.1))
-#summary(multi.rqfit)
-
 
 #Plotting each individual separately
 ggplot(data = actbud.sub, aes(x=ts, y = beep_count, color=beep_count)) +
@@ -291,6 +272,7 @@ sp<- ggplot(data=actbud.sub, aes(x = ts_since_rise, y = beep_count, color = beep
   geom_point() +
   facet_wrap(facets = vars(TagId))
 sp+scale_color_gradient(low = "blue", high = "orange")
+ggsave("Pond visitations since sunrise.png")
 
 sp2<-ggplot(data=actbud.sub, aes(x = ts_to_set, y = beep_count, color = beep_count)) +
   geom_point() +
@@ -314,6 +296,32 @@ ggplot(data = filter(actbud.sub1,
 daylength(lat=36.48946, doy= 2021-01-20) #14.65317
 daylength(lat=36.48946, doy= 2021-02-20) #14.65447
 daylength(lat=36.48946, doy= 2021-03-20) #14.6549
+
+#Generalized linear mixed model
+actbud.sub.glmm<-lme4::lmer(formula=beep_count~ts_since_rise+(1|TagId), data=actbud.sub)
+summary(actbud.sub.glmm)
+
+test_lo <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, family = MASS::negative.binomial(theta=1.75))
+summary(test_lo)
+r.squaredGLMM(test_lo)
+
+#Generalized additive mixed model
+actbud.sub$TagId<-as.factor(actbud.sub$TagId)
+actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+          family = poisson,
+          data=actbud.sub)
+summary(actbud.sub.gamm$gam)
+summary(actbud.sub.gamm$lme)
+plot(actbud.sub.gamm$gam)
+
+#s specifies the smoother
+#bs is basis, bs=tp low rank isotropic smoother
+md<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+          family = poisson,
+          data=actbud.sub)
+summary(md$gam)
+summary(md$lme)
+plot(md$gam)
 
 actbud.sub$beep_count.t<-actbud.sub$beep_count +1
 qqp(actbud.sub$beep_count.t, "norm")
@@ -351,14 +359,6 @@ plot(results)
 # get 95% confidence interval
 boot.ci(results, type="bca")
 
-#species models
-actbud.sub$TagId<-as.factor(actbud.sub$TagId)
-md<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-          family = poisson,
-          data=actbud.sub)
-summary(md$gam)
-summary(md$lme)
-plot(md$gam)
 
 
 md_gp <- as.data.frame(predict(md$gam, re.form = TRUE, se = TRUE, type = "response", exclude = s(TagId)))
@@ -375,8 +375,8 @@ ggplot(md_pred) +
 
 #Poisson regression modeling for count data
 hist(actbud.sub$beep_count)
-mean(actbud.sub$beep_count) #calculate mean
-var(actbud.sub$beep_count) #calculate variance
+mean(actbud.sub$beep_count) #calculate mean #9.24028208
+var(actbud.sub$beep_count) #calculate variance #60.5009591
 #since the variance is much greater than mean, it suggest that data has an over-dispersion in the model
 
 # model poisson regression using glm()
@@ -410,7 +410,8 @@ pois.gam = gam(beep_count ~ ts_since_rise + s(TagId), data= actbud.sub, family=c
 pois.gam.quasi = gam(beep_count ~ ts_since_rise + s(TagId), data=actbud.sub, family=c("quasipoisson"))  
 pois.gam.nb = gam(leaves ~ year + s(degdays), data=dat, family=nb())  
    
-
+#Read weather data
+weather_raw<- read.csv("/Users/gamageperera/Desktop/Motus/Motus/Weather data.KT.csv")
 
 # extract coefficients from first model using 'coef()'
 coef1 = coef(poisson.model)
