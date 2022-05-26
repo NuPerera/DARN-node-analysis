@@ -45,6 +45,9 @@ library(nlme)
 library(segmented)
 library(rsq)
 library(MuMIn)
+library(lattice)
+library(okmesonet)
+library(data.table)
 
 
 setwd("/Users/gamageperera/Desktop/Motus/Motus")
@@ -297,32 +300,99 @@ daylength(lat=36.48946, doy= 2021-01-20) #14.65317
 daylength(lat=36.48946, doy= 2021-02-20) #14.65447
 daylength(lat=36.48946, doy= 2021-03-20) #14.6549
 
-#Generalized linear mixed model
-actbud.sub.glmm<-lme4::lmer(formula=beep_count~ts_since_rise+(1|TagId), data=actbud.sub)
-summary(actbud.sub.glmm)
-
-test_lo <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, family = MASS::negative.binomial(theta=1.75))
-summary(test_lo)
-r.squaredGLMM(test_lo)
 
 #Generalized additive mixed model
+#s specifies the smoother
+#bs is basis, bs=tp low rank isotropic smoother
 actbud.sub$TagId<-as.factor(actbud.sub$TagId)
 actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
           family = poisson,
           data=actbud.sub)
+actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                       data = actbud.sub, method = "REML")
+summary(actbud.sub.gamm1$gam)
+
 summary(actbud.sub.gamm$gam)
 summary(actbud.sub.gamm$lme)
 plot(actbud.sub.gamm$gam)
+gam.check(actbud.sub.gamm$gam)
+plot(actbud.sub.gamm$gam, rug= TRUE)
+plot(actbud.sub.gamm$gam, shade = TRUE)
 
-#s specifies the smoother
-#bs is basis, bs=tp low rank isotropic smoother
-md<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-          family = poisson,
-          data=actbud.sub)
-summary(md$gam)
-summary(md$lme)
-plot(md$gam)
+### Generalized Linear Mixed Model (GLMM)
+actbud.sub.GLMM <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, family = MASS::negative.binomial(theta=1.75))
+summary(actbud.sub.GLMM)
+r.squaredGLMM(actbud.sub.GLMM)
 
+#GLMM with negative binomial
+actbud.sub.GLMM1 <- glmer.nb(beep_count ~ scale(ts_since_rise) + (1|TagId), 
+                         data = actbud.sub, family = MASS::negative.binomial(theta=1.75))
+summary(actbud.sub.GLMM1)
+
+
+md_temp <- actbud.sub
+md_gp <- as.data.frame(predict(actbud.sub.gamm$gam, re.form = TRUE,
+                               se = TRUE, type = "response", exclude = s(TagId)))
+md_pred <- cbind(md_temp, md_gp)
+
+panal <- ggplot(md_pred) +
+  geom_line(aes(ts_since_rise, fit)) +
+  geom_ribbon(data = md_pred, aes(x = ts_since_rise, ymin = (fit - 2*se.fit), ymax = (fit + 2*se.fit)), linetype = 2, alpha = 0.2) +
+  theme_bw() +
+  labs(x = "Time since sunrise", y = "Beep count", title = "Activity since sunrise") +
+  theme(plot.title = element_text(size = 20, hjust = 0.5))
+panal
+
+
+ggplot(md_pred) +
+  geom_line(aes(ts_since_rise, fit)) +
+  geom_ribbon(data = md_pred, aes(x = ts_since_rise, 
+                                  ymin = (fit - 2*se.fit), ymax = (fit + 2*se.fit)),
+              linetype = 2, alpha = 0.2) +
+  theme_bw() +
+  labs(x = "Time since sunrise", y = "Activity (Beep count)") +
+  facet_wrap("TagId", ncol = 2) +
+  theme(strip.text.x = element_text(size = 16), strip.background = element_blank(),
+        strip.placement = "outside", axis.title.x = element_text(size = 13),
+        axis.title.y = element_text(size = 13))
+
+
+## Weather patterns, using data from ERIC Station year 2021 on dates 1/19/21-3/28/21
+years = c(2021)
+wdsum_total = NULL
+mass = 16
+tuc = (6.130*(log10(mass))) + 28.328 #upper critical limit
+w=NULL
+#beginning of weather data loop
+beginTime = paste0(i,"-01-19 00:00:00", sep = "")
+endTime = paste0(i,"-03-28 23:55", sep = "")
+  
+
+stid <- "KENT"
+
+#Obtain data from OK Mesonet website
+updatestn() #get latest information on mesonet stations
+okstations = updatestn() #save latest information into okstations
+wok <- okmts(begintime=beginTime,
+               endtime=endTime, station = "KENT", lat = NULL, lon = NULL,
+               variables = c("TAIR", "RELH","PRES"), localtime = TRUE, missingNA = TRUE, mcores = FALSE)
+             
+w = rbind(wok,w)
+
+
+w$DT = as.POSIXct(w$TIME, tz = "UTC")
+w$DTL = w$DT #Saves datetime into a new vector for local datetime
+w$DATE = as.POSIXct(substr(w$TIME,0,10))
+w$MONTH = as.factor(substr(w$TIME,6,7))
+w$DAY = as.factor(substr(w$TIME,9,10))
+w$YMD = w$DATE
+attributes(w$DTL)$tzone = "America/Chicago" #changes datetime to Central Time Zone
+w$YMDL <- as_date(w$DTL) #gives local (Oklahoma) ymd date
+
+
+
+
+###################################
 actbud.sub$beep_count.t<-actbud.sub$beep_count +1
 qqp(actbud.sub$beep_count.t, "norm")
 qqp(actbud.sub$beep_count.t, "lnorm") #log normal
@@ -359,59 +429,14 @@ plot(results)
 # get 95% confidence interval
 boot.ci(results, type="bca")
 
-
-
-md_gp <- as.data.frame(predict(md$gam, re.form = TRUE, se = TRUE, type = "response", exclude = s(TagId)))
-md_pred <- cbind(actbud.sub, md_gp)
-
-ggplot(md_pred) +
-  geom_line(aes(beep_count, fit)) +
-  geom_ribbon(data = actbud.sub, aes(x = ts_since_rise, ymin = (fit - 2*se.fit), ymax = (fit + 2*se.fit)), linetype = 2, alpha = 0.2) +
-  theme_bw() +
-  labs(x = "", y = "", title = "") +
-  theme(plot.title = element_text(size = 20, hjust = 0.5))
-
-
-
 #Poisson regression modeling for count data
 hist(actbud.sub$beep_count)
 mean(actbud.sub$beep_count) #calculate mean #9.24028208
 var(actbud.sub$beep_count) #calculate variance #60.5009591
 #since the variance is much greater than mean, it suggest that data has an over-dispersion in the model
 
-# model poisson regression using glm()
-poisson.model<- glmer(beep_count ~ ts_since_rise + (1| TagId), actbud.sub,
-                      family = poisson(link = "log"))
-
-
-fm1.all <- allFit(poisson.model)
-summary(fm1.all)
-
-summary(poisson.model)
-plot(poisson.model)
-
-poisson.model2<- glm(beep_count ~ ts_since_rise + TagId, data = actbud.sub, family = quasipoisson(link = "log"))
-summary(poisson.model2)
-
-poisson.model3<- glm(beep_count ~ ts_since_rise +TagId, data = actbud.sub, family = "poisson")
-summary(poisson.model3)
-
-#generalized additive models
-mod.lm<-lm(beep_count~ts_since_rise, data=actbud.sub)
-mod.quad<- lm(beep_count~ts_since_rise +I(ts_since_rise), data=actbud.sub)
-mod.gam<- gam(beep_count~ s(ts_since_rise), data= actbud.sub)
-
-AIC(mod.lm, mod.quad, mod.gam)
-anova(mod.lm, mod.quad, mod.gam, test="F")
-
-pois.glm = glm(beep_count ~ ts_since_rise + TagId, data=actbud.sub, family=c("poisson"))  
-pois.gam = gam(beep_count ~ ts_since_rise + s(TagId), data= actbud.sub, family=c("poisson"))  
-
-pois.gam.quasi = gam(beep_count ~ ts_since_rise + s(TagId), data=actbud.sub, family=c("quasipoisson"))  
-pois.gam.nb = gam(leaves ~ year + s(degdays), data=dat, family=nb())  
    
-#Read weather data
-weather_raw<- read.csv("/Users/gamageperera/Desktop/Motus/Motus/Weather data.KT.csv")
+
 
 # extract coefficients from first model using 'coef()'
 coef1 = coef(poisson.model)
@@ -456,38 +481,8 @@ plot(actbud.sub$ts_since_rise, actbud.sub$beep_count)
 #add segmented regression model
 plot(segmented.ft, add=T, col = "red")
 
-#Linear regression model
-summary(fit)
-ggplot(data=actbud.sub, aes(x = ts_since_rise, y = beep_count, color = beep_count)) +
-  geom_point() +
-  geom_smooth(method="lm", se=FALSE, colour="Yellow")+
-  theme_minimal()+
-  labs(x='Time since sunrise', y='Beep count', title='Linear Regression Plot') +
-  theme(plot.title = element_text(hjust=0.5, size=20, face='bold')) 
 
-#linear mixed effects model
-actbud.mixed<-lmer(beep_count~ts_since_rise + (1 | TagId) +(1|NodeId), data = actbud.sub)
-summary(actbud.mixed)
-
-(mm_plot <- ggplot(actbud.sub, aes(x = ts_since_rise, y = beep_count, colour = TagId)) +
-    facet_wrap(~TagId, nrow=2) +   
-    geom_point(alpha = 0.5) +
-    theme_classic() +
-    geom_line(data = cbind(actbud.sub, pred = predict(actbud.mixed)), aes(y = beep_count), size = 1) +  # adding predicted line from mixed model 
-    theme(legend.position = "none",
-          panel.spacing = unit(2, "lines"))  # adding space between panels
-)
-
-anova(actbud.mixed)
-
-
-actbud.mixed<-lmer(beep_count~ts_since_rise + (1 | TagId), data = actbud.sub)
-summary(actbud.mixed)
-#confidence interval
-confint(actbud.mixed)
-#estimates of the random effects
-ranef(actbud.mixed)$TagId %>% head(5)
-#-------------------------------------------------------------------------------------------
+###############################
 #Not accurate to split freq column to date and time, it split as a chr
 #Splitting date and time
 actbud_split<- actbud %>%
