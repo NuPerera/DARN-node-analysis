@@ -13,9 +13,11 @@ install.packages("rgdal")
 update.packages("rgdal")
 install.packages("rsq")
 install.packages("MumIn")
+install.packages("rgl")
 library(raster)
 library(sp)
 library(rgdal)
+library(rgl)
 library(sf)
 library(ggplot2)
 library(geosphere)
@@ -104,9 +106,9 @@ resampled <- advanced_resampled_stats(beeps = beep_data, node = nodes, freq = fr
 resampled<- resampled %>%
   filter(!is.na(TagRSSI_sd))
 resampled
-p3 = ggplot(data=resampled, aes(x=freq, y=TagRSSI_max, group=NodeId, colour=NodeId)) +
+p1 = ggplot(data=resampled, aes(x=freq, y=TagRSSI_max, group=NodeId, colour=NodeId)) +
   geom_line()
-p3
+p1
 
 #total number of observations for each bird
 LOdf<- resampled %>%
@@ -226,7 +228,7 @@ ggplot(data = filter(actbud.sub, TagId == 61780778),
   geom_vline(aes(xintercept = sunset), col = "blue")
 
 #time to sunrise and sunset each month
-p9<- ggplot(data = filter(actbud.sub, TagId == 61780778,
+p2<- ggplot(data = filter(actbud.sub, TagId == 61780778,
                      ts > ("2021-01-20 15:06:00"),
                      ts < ("2021-01-31 22:39:00")), 
        aes(x = ts, y = beep_count)) +
@@ -236,7 +238,7 @@ p9<- ggplot(data = filter(actbud.sub, TagId == 61780778,
   geom_vline(aes(xintercept = sunrise), col = "orange") + 
   geom_vline(aes(xintercept = sunset), col = "blue")
 
-p10<- ggplot(data = filter(actbud.sub, TagId == 61780778,
+p3<- ggplot(data = filter(actbud.sub, TagId == 61780778,
                      ts > ("2021-02-01 14:39:00"),
                      ts < ("2021-02-28 23:21:00")), 
        aes(x = ts, y = beep_count)) +
@@ -246,7 +248,7 @@ p10<- ggplot(data = filter(actbud.sub, TagId == 61780778,
   geom_vline(aes(xintercept = sunrise), col = "orange") + 
   geom_vline(aes(xintercept = sunset), col = "blue")
 
-p11<- ggplot(data = filter(actbud.sub, TagId == 61780778,
+p4<- ggplot(data = filter(actbud.sub, TagId == 61780778,
                      ts > ("2021-03-01 14:57:00"),
                      ts < ("2021-03-28 14:39:00")), 
        aes(x = ts, y = beep_count)) +
@@ -256,7 +258,7 @@ p11<- ggplot(data = filter(actbud.sub, TagId == 61780778,
   geom_vline(aes(xintercept = sunrise), col = "orange") + 
   geom_vline(aes(xintercept = sunset), col = "blue")
 
-plot_grid(p9, p10, p11, labels = "AUTO")
+plot_grid(p2, p3, p4, labels = "AUTO")
 
 #beep counts from sunrise and sunset
 ggplot(data=actbud.sub, aes(x = ts_since_rise, y = beep_count, color = beep_count)) +
@@ -308,19 +310,32 @@ actbud.sub$TagId<-as.factor(actbud.sub$TagId)
 actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
           family = poisson,
           data=actbud.sub)
-actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-                       data = actbud.sub, method = "REML")
-summary(actbud.sub.gamm1$gam)
-
 summary(actbud.sub.gamm$gam)
 summary(actbud.sub.gamm$lme)
 plot(actbud.sub.gamm$gam)
 gam.check(actbud.sub.gamm$gam)
 plot(actbud.sub.gamm$gam, rug= TRUE)
 plot(actbud.sub.gamm$gam, shade = TRUE)
+plot.gam(actbud.sub.gamm$gam)
+
+
+#using REML (Restricted Maximum Likelihood) method
+actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                       data = actbud.sub, method = "REML")
+actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                       data = actbud.sub, method = "negative.binomial")
+summary(actbud.sub.gamm1$gam)
+plot(actbud.sub.gamm1$gam, shade = TRUE)
+
+intervals(actbud.sub.gamm1$lme, which="var-cov")
+
+E.actbud<- resid(actbud.sub.gamm1$gam)
+fit.E<-fitted(actbud.sub.gamm1$gam)
+plot(x=fit.E, y=E.actbud, xlab="Fitted values", ylab="Residuals")
 
 ### Generalized Linear Mixed Model (GLMM)
-actbud.sub.GLMM <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, family = MASS::negative.binomial(theta=1.75))
+actbud.sub.GLMM <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, 
+                         family = MASS::negative.binomial(theta=1.75))
 summary(actbud.sub.GLMM)
 r.squaredGLMM(actbud.sub.GLMM)
 
@@ -356,29 +371,38 @@ ggplot(md_pred) +
         strip.placement = "outside", axis.title.x = element_text(size = 13),
         axis.title.y = element_text(size = 13))
 
+anova(actbud.sub.gamm1$gam, actbud.sub.GLMM1, test="F")
 
+
+####################################################################################
 ## Weather patterns, using data from ERIC Station year 2021 on dates 1/19/21-3/28/21
+
+beginTime = paste0(i,"-05-01 00:00:00", sep = "")
+endTime = paste0(i,"-06-30 23:55", sep = "")
+
+
 years = c(2021)
 wdsum_total = NULL
 mass = 16
 tuc = (6.130*(log10(mass))) + 28.328 #upper critical limit
 w=NULL
-#beginning of weather data loop
-beginTime = paste0(i,"-01-19 00:00:00", sep = "")
-endTime = paste0(i,"-03-28 23:55", sep = "")
+
+for(i in years){ #beginning of weather data loop
+  beginTime = paste0(i,"-01-19 00:00:00", sep = "")
+  endTime = paste0(i,"-03-28 23:55", sep = "")
   
-
-stid <- "KENT"
-
-#Obtain data from OK Mesonet website
-updatestn() #get latest information on mesonet stations
-okstations = updatestn() #save latest information into okstations
-wok <- okmts(begintime=beginTime,
-               endtime=endTime, station = "KENT", lat = NULL, lon = NULL,
-               variables = c("TAIR", "RELH","PRES"), localtime = TRUE, missingNA = TRUE, mcores = FALSE)
-             
-w = rbind(wok,w)
-
+  stid <- "KENT"
+  
+  #Obtain data from OK Mesonet website
+  updatestn() #get latest information on mesonet stations
+  okstations = updatestn() #save latest information into okstations
+  wok <- okmts(begintime=beginTime,
+               endtime=endTime, 
+               variables = c("TAIR", "RELH","PRES"),
+               station="KENT",  
+               localtime = TRUE, missingNA = TRUE, mcores = FALSE) #Need to download the data into UTC
+  w = rbind(wok,w)
+}
 
 w$DT = as.POSIXct(w$TIME, tz = "UTC")
 w$DTL = w$DT #Saves datetime into a new vector for local datetime
@@ -390,7 +414,165 @@ attributes(w$DTL)$tzone = "America/Chicago" #changes datetime to Central Time Zo
 w$YMDL <- as_date(w$DTL) #gives local (Oklahoma) ymd date
 
 
+actbud$freq <- as.POSIXct(actbud$freq, tz="UTC")  #Make Posix time-CHECK TIME ZONE!!!
 
+#Make a dataframe to define time bins.
+
+bins <- data.frame( bin1 = seq.POSIXt(from = min(actbud$freq)-1*60, to = max(actbud$freq)-1*60, by = 5*60),
+                    bin2 = seq.POSIXt(from = min(actbud$freq)+4*60, to = max(actbud$freq)+4*60, by = 5*60) )
+
+
+#Make a new column for time bin
+
+actbud$timeBin <- actbud$freq
+
+#loop through each individual and each data line.
+
+for(id in unique(actbud$TagId)) {
+  
+  subId <- subset(actbud, actbud$TagId==id)
+  
+  for(i in nrow(subId)) {
+    
+    b1 <- which(bins$bin1 <= subId$freq[i] & bins$bin2 > subId$freq[i])
+    
+    subId$timeBin[i] <- bins$bin1[b1]
+    
+  }
+  
+  summed <- aggregate(subId$beep_count, by=list(subId$timeBin), FUN=sum)
+  
+  summed$ID = id
+  
+  if(id == unique(actbud$TagId)[1]){
+    
+    output = summed
+    
+  } else {
+    
+    output = rbind(output, summed)
+    
+  }
+  
+}
+
+
+#with actbud.sub
+
+actbud.sub$freq <- as.POSIXct(actbud.sub$freq, tz="UTC")  #Make Posix time-CHECK TIME ZONE!!!
+
+#Make a dataframe to define time bins.
+
+bins <- data.frame( bin1 = seq.POSIXt(from = min(actbud.sub$freq)-1*60, to = max(actbud.sub$freq)-1*60, by = 5*60),
+                    
+                    bin2 = seq.POSIXt(from = min(actbud.sub$freq)+4*60, to = max(actbud.sub$freq)+4*60, by = 5*60) )
+
+#make a dataframe with 30mins
+bins_30 <- data.frame( bin30 = seq.POSIXt(from = min(actbud.sub$freq)-1*60, to = max(actbud.sub$freq)-1*60, by = 30*60))
+
+#Make a new column for time bin
+actbud.sub$timeBin <- actbud.sub$freq
+
+actbud.sub$bins <- cut(actbud.sub$ts, breaks= bins$bin1)
+#bin with 30mins
+actbud.sub$bin_30<- cut(actbud.sub$ts, breaks= bins_30$bin30)
+
+actbud.sub2<- actbud.sub%>%
+  group_by(bins)%>%
+  summarise(beep_count=sum(beep_count))
+    
+actbud.sub3 <- merge(actbud.sub, actbud.sub2, by="bins" )
+
+#merging weather data to actbud.sub3
+wok<- rename(wok, bins=TIME)
+actbud.sub4<-merge(actbud.sub3, wok, by=c("bins"), all.x =TRUE)
+
+actbud.sub3$bins <- as.POSIXct(actbud.sub3$bins, tz="UTC")
+actbud.sub4<-left_join(x=actbud.sub3, y=wok)
+
+#Generalized additive mixed model for weather
+#s specifies the smoother
+#bs is basis, bs=tp low rank isotropic smoother
+actbud.sub4$TagId<-as.factor(actbud.sub4$TagId)
+
+actbud.sub4.gamm<- gamm(beep_count.y ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TAIR, bs="tp")+ s(RELH, bs="tp") +s(TagId, bs ="re"),
+                        data = actbud.sub4, method = "REML")
+
+summary(actbud.sub4.gamm$gam)
+summary(actbud.sub.gamm$lme)
+intervals(actbud.sub4.gamm$lme, which="var-cov")
+plot(actbud.sub4.gamm$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE)
+
+anova(actbud.sub4.gamm$gam)
+
+#gam.check
+#my models are not fitting the data well.  
+gam.check(actbud.sub4.gamm$gam)
+
+
+
+##check
+#Colinearity
+#with(actbud.sub4, cor(TAIR, RELH))
+#cor_matrix<- cor(actbud.sub4)
+vif(actbud.sub4.gamm$gam)
+vif_values<- vif(actbud.sub4.gamm$gam)
+barplot(vif_values, main = "VIF Values",col = 'green',ylim = c(0.0,8.0))
+bad_vif <- 5.0
+abline(h = bad_vif, lwd = 3, lty = 2,col = 'red')
+interaction(actbud.sub4.gamm$ts_since_rise, actbud.sub4$TAIR)
+
+#sum of activity throughout the day
+actbud_split<- actbud.sub4 %>%
+  separate (freq, c("Date", "Time"), " ")
+
+
+actbud.sub5<- actbud_split%>%
+  group_by(TagId, Date)%>%
+  summarise(beep_count.y=sum(beep_count.y))
+
+#need to calculate mean temp over night
+wea <- wok %>%
+  mutate(Hour = hour(bins)) %>%
+  mutate(Date = date(bins)) %>%
+  filter(Hour >= 6 & Hour <= 11) 
+
+wea<- wea%>% group_by(Date)%>%
+  summarise_all("mean")%>%
+  filter(!is.na(TAIR))
+
+actbud.sub5$Date <- as.Date(actbud.sub5$Date)
+actbud.sub6<-left_join(x=actbud.sub5, y=wea)
+actbud.sub6<-actbud.sub6%>%
+  filter(!is.na(Hour))
+
+actbud.sub6$TagId <- as.factor(actbud.sub6$TagId)
+
+
+actbud.sub6.gamm<- gamm(beep_count.y ~ s(RELH, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                        data = actbud.sub6, method = "REML")
+actbud.sub6.gamm<- gamm(beep_count.y ~ s(TAIR, fx= FALSE, bs = "tp")+ s(RELH, bs ="tp")+ s(TagId, bs ="re"),
+                        data = actbud.sub6, method = "REML")
+
+summary(actbud.sub6.gamm$gam)
+summary(actbud.sub.gamm$lme)
+intervals(actbud.sub.gamm1$lme, which="var-cov")
+plot(actbud.sub6.gamm$gam, shade = TRUE)
+
+
+# Plot
+install.packages("plotly")
+library(plotly)
+plot_ly(x=actbud.sub4$ts_since_rise, y=actbud.sub4$beep_count.y, z=actbud.sub4$TAIR, 
+        type="scatter3d", mode="markers", color=actbud.sub4$TagId)
+
+plot_ly(x=actbud.sub4$ts_since_rise, y=actbud.sub4$TAIR, z=actbud.sub4$beep_count.y) %>%
+  add_lines(color = actbud.sub$TagId) %>%
+  layout(scene = list(
+    xaxis = list(title = "Time since sunrise"),
+    yaxis = list(title = "Air Temperature"),
+    zaxis = list(title = "Beep count")))
+    
 
 ###################################
 actbud.sub$beep_count.t<-actbud.sub$beep_count +1
@@ -434,9 +616,6 @@ hist(actbud.sub$beep_count)
 mean(actbud.sub$beep_count) #calculate mean #9.24028208
 var(actbud.sub$beep_count) #calculate variance #60.5009591
 #since the variance is much greater than mean, it suggest that data has an over-dispersion in the model
-
-   
-
 
 # extract coefficients from first model using 'coef()'
 coef1 = coef(poisson.model)
@@ -493,7 +672,6 @@ actbud_split<-resampled%>%
   mutate(ts=as.numeric(freq))
 str(actbud_split$Time)
 
-
 freq_sum2<- actbud_split %>%
   filter(TagId==61780778) %>%
   group_by(Time)
@@ -545,7 +723,6 @@ ggplot(data = actbud_split, aes(x=Time, y = beep_count, color = beep_count)) +
 
 
 #-------------------------------------------------------------------------------------------------------------
-
 
 #bird 61780778 was pinged at 3287DE the most, which is the closest west node. 32624B (north) and 328A8E(south) are in second
 
