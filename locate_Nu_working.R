@@ -1,3 +1,5 @@
+RStudio.Version()
+
 #Edited by Nu Perera
 #email: nuperera@ou.edu
 
@@ -310,13 +312,20 @@ actbud.sub$TagId<-as.factor(actbud.sub$TagId)
 actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
           family = poisson,
           data=actbud.sub)
+
+#code from Michael
+actbud.sub.gamm <- gamm(beep_count ~ s(ts_since_rise, k=10), family = nb, data=actbud.sub, random=list(TagId=~1))
+
 summary(actbud.sub.gamm$gam)
 summary(actbud.sub.gamm$lme)
-plot(actbud.sub.gamm$gam)
 gam.check(actbud.sub.gamm$gam)
 plot(actbud.sub.gamm$gam, rug= TRUE)
-plot(actbud.sub.gamm$gam, shade = TRUE)
-plot.gam(actbud.sub.gamm$gam)
+#it's often useful to ploy the standard errors of a partial effect term combined with the standard errors of the model intercept.
+#this is because confidence intervals at the mean value of a variable can be very tiny and don't reflect overall uncertainty in our model.
+#Using seWithMean argument adds this uncertainty.
+#Used "shift" to shift the scale so that the intercept is included.
+plot(actbud.sub.gamm$gam, shade = TRUE, shade.col = "lightgreen", seWithMean = TRUE, 
+     ylab= "Pond Visitation", xlab= "Time since sunrise", shift = coef(actbud.sub.gamm$gam)[1])
 
 
 #using REML (Restricted Maximum Likelihood) method
@@ -326,6 +335,7 @@ actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(T
                        data = actbud.sub, method = "negative.binomial")
 summary(actbud.sub.gamm1$gam)
 plot(actbud.sub.gamm1$gam, shade = TRUE)
+gam.check(actbud.sub.gamm1$gam)
 
 intervals(actbud.sub.gamm1$lme, which="var-cov")
 
@@ -372,7 +382,7 @@ ggplot(md_pred) +
         axis.title.y = element_text(size = 13))
 
 anova(actbud.sub.gamm1$gam, actbud.sub.GLMM1, test="F")
-
+gam.check(actbud.sub.gamm1$gam)
 
 ####################################################################################
 ## Weather patterns, using data from ERIC Station year 2021 on dates 1/19/21-3/28/21
@@ -493,23 +503,31 @@ actbud.sub4<-left_join(x=actbud.sub3, y=wok)
 #Generalized additive mixed model for weather
 #s specifies the smoother
 #bs is basis, bs=tp low rank isotropic smoother
+#re = Random effect smoother
 actbud.sub4$TagId<-as.factor(actbud.sub4$TagId)
 
-actbud.sub4.gamm<- gamm(beep_count.y ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TAIR, bs="tp")+ s(RELH, bs="tp") +s(TagId, bs ="re"),
-                        data = actbud.sub4, method = "REML")
-
+actbud.sub4.gamm <- gamm(beep_count.y ~ s(TAIR, k=14), family = nb, data=actbud.sub4, random=list(TagId=~1))
+plot(actbud.sub4.gamm$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Air Temperature", shift = coef(actbud.sub4.gamm$gam)[1])
 summary(actbud.sub4.gamm$gam)
 summary(actbud.sub.gamm$lme)
+gam.check(actbud.sub4.gamm$gam)
+
+actbud.sub4.gamm2 <- gamm(beep_count.y ~ s(RELH, k=10), family = nb, data=actbud.sub4, random=list(TagId=~1))
+plot(actbud.sub4.gamm2$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Relative Humidity", shift = coef(actbud.sub4.gamm2$gam)[1])
+summary(actbud.sub4.gamm2$gam)
+summary(actbud.sub.gamm2$lme)
+gam.check(actbud.sub4.gamm2$gam)
+
+
 intervals(actbud.sub4.gamm$lme, which="var-cov")
-plot(actbud.sub4.gamm$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE)
 
 anova(actbud.sub4.gamm$gam)
 
-#gam.check
-#my models are not fitting the data well.  
-gam.check(actbud.sub4.gamm$gam)
-
-
+AIC(actbud.sub4.gamm$gam)
+summary(actbud.sub4.gamm$gam)$sp.criterion
+summary(actbud.sub4.gamm$gam)$r.sq
 
 ##check
 #Colinearity
@@ -531,7 +549,7 @@ actbud.sub5<- actbud_split%>%
   group_by(TagId, Date)%>%
   summarise(beep_count.y=sum(beep_count.y))
 
-#need to calculate mean temp over night
+#Calculate mean temp over night
 wea <- wok %>%
   mutate(Hour = hour(bins)) %>%
   mutate(Date = date(bins)) %>%
@@ -548,16 +566,24 @@ actbud.sub6<-actbud.sub6%>%
 
 actbud.sub6$TagId <- as.factor(actbud.sub6$TagId)
 
-
-actbud.sub6.gamm<- gamm(beep_count.y ~ s(RELH, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-                        data = actbud.sub6, method = "REML")
-actbud.sub6.gamm<- gamm(beep_count.y ~ s(TAIR, fx= FALSE, bs = "tp")+ s(RELH, bs ="tp")+ s(TagId, bs ="re"),
-                        data = actbud.sub6, method = "REML")
-
+actbud.sub6.gamm<- gamm(beep_count.y ~ s(TAIR, k=10), family = nb, data=actbud.sub6, random=list(TagId=~1))
 summary(actbud.sub6.gamm$gam)
 summary(actbud.sub.gamm$lme)
+plot(actbud.sub6.gamm$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Overnight Temperature", shift = coef(actbud.sub6.gamm$gam)[1])
+
+actbud.sub6.gamm2 <- gamm(beep_count.y ~ s(RELH, k=10), family = nb, data=actbud.sub6, random=list(TagId=~1))
+summary(actbud.sub6.gamm2$gam)
+summary(actbud.sub.gamm2$lme)
+plot(actbud.sub6.gamm2$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Overnight Relative Humidity", shift = coef(actbud.sub6.gamm2$gam)[1])
+
+
 intervals(actbud.sub.gamm1$lme, which="var-cov")
 plot(actbud.sub6.gamm$gam, shade = TRUE)
+plot(actbud.sub6.gamm2$gam, shade = TRUE)
+
+plot(actbud.sub6.gamm2$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE)
 
 
 # Plot
