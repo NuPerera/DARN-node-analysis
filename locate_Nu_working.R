@@ -313,7 +313,6 @@ actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(Ta
           family = poisson,
           data=actbud.sub)
 
-#code from Michael
 actbud.sub.gamm <- gamm(beep_count ~ s(ts_since_rise, k=10), family = nb, data=actbud.sub, random=list(TagId=~1))
 
 summary(actbud.sub.gamm$gam)
