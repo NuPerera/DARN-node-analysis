@@ -16,6 +16,10 @@ update.packages("rgdal")
 install.packages("rsq")
 install.packages("MumIn")
 install.packages("rgl")
+install.packages("datasets")
+install.packages("caTools")
+install.packages("party")
+install.packages("magrittr")
 library(raster)
 library(sp)
 library(rgdal)
@@ -52,6 +56,10 @@ library(MuMIn)
 library(lattice)
 library(okmesonet)
 library(data.table)
+library(datasets)
+library(caTools)
+library(party)
+library(magrittr)
 
 
 setwd("/Users/gamageperera/Desktop/Motus/Motus")
@@ -300,25 +308,56 @@ ggplot(data = filter(actbud.sub1,
   labs(title = "TagID 61780778", x = "Time since sunrise", y = "Beep count")
 
 #Add day length to the data set
-daylength(lat=36.48946, doy= 2021-01-20) #14.65317
-daylength(lat=36.48946, doy= 2021-02-20) #14.65447
-daylength(lat=36.48946, doy= 2021-03-20) #14.6549
+library(suncalc)
+library(scales)
+
+sundata <-
+  getSunlightTimes(
+    date = seq.Date(as.Date("2021-01-20"), as.Date("2021-03-28"), by = 1),
+    keep = c("sunrise", "sunriseEnd", "sunset", "sunsetStart"),
+    lat = 36.4957,
+    lon = -102.6495,
+    tz = "UTZ"
+  )
+
+#Daytime duration
+sundata %>%
+  mutate(
+    date = as.POSIXct(date),
+    day_length = as.numeric(sunset - sunrise)
+  ) %>%
+  ggplot(aes(x = date, y = day_length)) +
+  geom_area(fill = "#FDE725FF", alpha = .4) +
+  geom_line(color = "#525252") +
+  scale_x_datetime(
+    expand = c(0, 0),
+    labels = date_format("%b '%y"),
+    breaks =  seq(as.POSIXct(min(sundata$date)), as.POSIXct(max(sundata$date)), "month"),
+    minor_breaks = NULL
+  ) +
+  scale_y_continuous(
+    limits = c(0, 24),
+    breaks = seq(0, 24, 2),
+    expand = c(0, 0),
+    minor_breaks = NULL
+  ) +
+  labs(x = "Date", y = "Hours", title = "Oklahoma/Texas/New Mexico - Daytime duration") +
+  theme_bw()
+sundata$day_length = as.numeric(sundata$sunset - sundata$sunrise)
+mean(sundata$day_length)
 
 
 #Generalized additive mixed model
 #s specifies the smoother
 #bs is basis, bs=tp low rank isotropic smoother
 actbud.sub$TagId<-as.factor(actbud.sub$TagId)
-actbud.sub.gamm<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-          family = poisson,
-          data=actbud.sub)
 
 actbud.sub.gamm <- gamm(beep_count ~ s(ts_since_rise, k=10), family = nb, data=actbud.sub, random=list(TagId=~1))
 
 summary(actbud.sub.gamm$gam)
 summary(actbud.sub.gamm$lme)
 gam.check(actbud.sub.gamm$gam)
-plot(actbud.sub.gamm$gam, rug= TRUE)
+
 #it's often useful to ploy the standard errors of a partial effect term combined with the standard errors of the model intercept.
 #this is because confidence intervals at the mean value of a variable can be very tiny and don't reflect overall uncertainty in our model.
 #Using seWithMean argument adds this uncertainty.
@@ -328,19 +367,25 @@ plot(actbud.sub.gamm$gam, shade = TRUE, shade.col = "lightgreen", seWithMean = T
 
 
 #using REML (Restricted Maximum Likelihood) method
-actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-                       data = actbud.sub, method = "REML")
-actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
-                       data = actbud.sub, method = "negative.binomial")
-summary(actbud.sub.gamm1$gam)
-plot(actbud.sub.gamm1$gam, shade = TRUE)
-gam.check(actbud.sub.gamm1$gam)
+#actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                      # data = actbud.sub, method = "REML")
+#actbud.sub.gamm1<- gamm(beep_count ~ s(ts_since_rise, fx= FALSE, bs = "tp")+ s(TagId, bs ="re"),
+                       #data = actbud.sub, method = "negative.binomial")
+#summary(actbud.sub.gamm1$gam)
+#plot(actbud.sub.gamm1$gam, shade = TRUE)
+#gam.check(actbud.sub.gamm1$gam)
 
-intervals(actbud.sub.gamm1$lme, which="var-cov")
+#intervals(actbud.sub.gamm1$lme, which="var-cov")
 
-E.actbud<- resid(actbud.sub.gamm1$gam)
-fit.E<-fitted(actbud.sub.gamm1$gam)
-plot(x=fit.E, y=E.actbud, xlab="Fitted values", ylab="Residuals")
+#E.actbud<- resid(actbud.sub.gamm1$gam)
+#fit.E<-fitted(actbud.sub.gamm1$gam)
+#plot(x=fit.E, y=E.actbud, xlab="Fitted values", ylab="Residuals")
+
+#correlation between RELH and TAIR
+install.packages("corrplot")
+library(corrplot)
+
+corrplot(actbud.sub, method = 'number')
 
 ### Generalized Linear Mixed Model (GLMM)
 actbud.sub.GLMM <- glmer(beep_count ~ scale(ts_since_rise) + (1|TagId), data = actbud.sub, 
@@ -385,9 +430,9 @@ gam.check(actbud.sub.gamm1$gam)
 
 ####################################################################################
 ## Weather patterns, using data from ERIC Station year 2021 on dates 1/19/21-3/28/21
-
-beginTime = paste0(i,"-05-01 00:00:00", sep = "")
-endTime = paste0(i,"-06-30 23:55", sep = "")
+library(okmesonet)
+beginTime = paste0(i,"-01-19 00:00:00", sep = "")
+endTime = paste0(i,"-03-28 23:55", sep = "")
 
 
 years = c(2021)
@@ -403,11 +448,12 @@ for(i in years){ #beginning of weather data loop
   stid <- "KENT"
   
   #Obtain data from OK Mesonet website
+  #DAVG- average dew point temperature, HAVG - Average relative humidity, WSPD - Average wind speed
   updatestn() #get latest information on mesonet stations
   okstations = updatestn() #save latest information into okstations
   wok <- okmts(begintime=beginTime,
                endtime=endTime, 
-               variables = c("TAIR", "RELH","PRES"),
+               variables = c("TAIR", "RELH","PRES", "WSPD", "SRAD"),
                station="KENT",  
                localtime = TRUE, missingNA = TRUE, mcores = FALSE) #Need to download the data into UTC
   w = rbind(wok,w)
@@ -519,15 +565,50 @@ summary(actbud.sub4.gamm2$gam)
 summary(actbud.sub.gamm2$lme)
 gam.check(actbud.sub4.gamm2$gam)
 
+actbud.sub4.gamm3 <- gamm(beep_count.y ~ s(WSPD, k=10), family = nb, data=actbud.sub4, random=list(TagId=~1))
+plot(actbud.sub4.gamm3$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Wind Speed", shift = coef(actbud.sub4.gamm3$gam)[1])
+summary(actbud.sub4.gamm3$gam)
 
-intervals(actbud.sub4.gamm$lme, which="var-cov")
+#interaction
+actbud.sub4.gamm4 <- gamm(beep_count.y ~ s(RELH, k=10) + s(TAIR, k=10), family = nb, data=actbud.sub4, random=list(TagId=~1))
+summary(actbud.sub4.gamm4$gam)
+
+#Adding dew point temperature
+install.packages("weathermetrics")
+library(weathermetrics)
+actbud.sub4$DP<- humidity.to.dewpoint(t=actbud.sub4$TAIR, rh=actbud.sub4$RELH,temperature.metric = 'celsius')
+
+actbud.sub4.gamm4 <- gamm(beep_count.y ~ s(DP, k=10), family = nb, data=actbud.sub4, random=list(TagId=~1))
+plot(actbud.sub4.gamm4$gam, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Dew point temperature", shift = coef(actbud.sub4.gamm4$gam)[1])
+summary(actbud.sub4.gamm4$gam)
+
+#Correlation
+correlation<- cor.test(actbud.sub4$TAIR, actbud.sub4$RELH, method = "pearson")
+correlation
+cor(actbud.sub4$TAIR, actbud.sub4$RELH, use="complete.obs")
+
+
+installed.packages("ggpubr")
+library(ggpubr)
+ggscatter(actbud.sub4, x = "TAIR", y = "RELH", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "TAIR", ylab = "RELH")
+
+# TAIR
+ggqqplot(actbud.sub4$TAIR, ylab = "TAIR")
+# RELH
+ggqqplot(actbud.sub4$RELH, ylab = "RELH")
+
 
 anova(actbud.sub4.gamm$gam)
 
 AIC(actbud.sub4.gamm$gam)
 summary(actbud.sub4.gamm$gam)$sp.criterion
 summary(actbud.sub4.gamm$gam)$r.sq
-
+intervals(actbud.sub4.gamm$lme, which="var-cov")
 ##check
 #Colinearity
 #with(actbud.sub4, cor(TAIR, RELH))
@@ -538,6 +619,7 @@ barplot(vif_values, main = "VIF Values",col = 'green',ylim = c(0.0,8.0))
 bad_vif <- 5.0
 abline(h = bad_vif, lwd = 3, lty = 2,col = 'red')
 interaction(actbud.sub4.gamm$ts_since_rise, actbud.sub4$TAIR)
+
 
 #sum of activity throughout the day
 actbud_split<- actbud.sub4 %>%
@@ -578,27 +660,105 @@ plot(actbud.sub6.gamm2$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE,
      ylab= "Pond Visitation", xlab= "Overnight Relative Humidity", shift = coef(actbud.sub6.gamm2$gam)[1])
 
 
+actbud.sub6$DP<- humidity.to.dewpoint(t=actbud.sub6$TAIR, rh=actbud.sub6$RELH,temperature.metric = 'celsius')
+
+actbud.sub6.gamm3<- gamm(beep_count.y ~ s(DP, k=15), family = nb, data=actbud.sub6, random=list(TagId=~1))
+plot(actbud.sub6.gamm3$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE,
+     ylab= "Pond Visitation", xlab= "Overnight Dew point temperature", shift = coef(actbud.sub6.gamm3$gam)[1])
+summary(actbud.sub6.gamm3$gam)
+
 intervals(actbud.sub.gamm1$lme, which="var-cov")
 plot(actbud.sub6.gamm$gam, shade = TRUE)
 plot(actbud.sub6.gamm2$gam, shade = TRUE)
 
 plot(actbud.sub6.gamm2$gam, shade = TRUE, shade.col = "pink", seWithMean = TRUE)
 
+#Both TAIR and RELH in one code
+actbud.sub6.gamm3 <- gamm (beep_count.y ~ s(RELH, k=10) + s(TAIR, k=10), family = nb, data=actbud.sub6, random=list(TagId=~1))
+summary(actbud.sub6.gamm3$gam)
+plot(actbud.sub6.gamm3$gam, shade = TRUE, shade.col = "purple", seWithMean = TRUE,
+     ylab= "Pond Visitation", shift = coef(actbud.sub6.gamm2$gam)[1])
 
-# Plot
+cor(actbud.sub6$TAIR, actbud.sub6$RELH, use="complete.obs")
+correlation2<- cor.test(actbud.sub6$TAIR, actbud.sub6$RELH, method = "pearson")
+correlation2
+ggscatter(actbud.sub6, x = "TAIR", y = "RELH", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "TAIR", ylab = "RELH")
+# 3D Plot
 install.packages("plotly")
+install.packages("reshape2")
+install.packages("tidymodels")
+install.packages("kernlab")
+install.packages("pracma")
 library(plotly)
-plot_ly(x=actbud.sub4$ts_since_rise, y=actbud.sub4$beep_count.y, z=actbud.sub4$TAIR, 
-        type="scatter3d", mode="markers", color=actbud.sub4$TagId)
+library(reshape2)
+library(tidyverse)
+library(tidymodels)
+library(plotly)
+library(kernlab)
+library(pracma)
 
+#Creating a mesh plot for TAIR and time since sunrise
+mesh_size <- .02
+margin <- 0
+x <- actbud.sub4 %>% select(ts_since_rise, TAIR)
+y <- actbud.sub4 %>% select(beep_count.y)
+
+#model <- svm_rbf(cost = 1.0) %>% 
+  #set_engine("kernlab") %>% 
+  #set_mode("regression") %>% 
+  #fit(beep_count.y ~ ts_since_rise + TAIR, data = actbud.sub4)
+
+x_min <- min(x$ts_since_rise) - margin
+x_max <- max(x$ts_since_rise) - margin
+y_min <- min(x$TAIR) - margin
+y_max <- max(x$TAIR) - margin
+xrange <- seq(x_min, x_max, mesh_size)
+yrange <- seq(y_min, y_max, mesh_size)
+xy <- meshgrid(x = xrange, y = yrange)
+xx <- xy$X
+yy <- xy$Y
+dim_val <- dim(xx)
+xx1 <- matrix(xx, length(xx), 1)
+yy1 <- matrix(yy, length(yy), 1)
+final <- cbind(xx1, yy1)
+pred <- model %>%
+  predict(final)
+
+
+fig<-plot_ly(actbud.sub4, x= ~beep_count.y, y= ~TAIR, z= ~ts_since_rise) %>% add_markers(size=5) %>%
+  add_surface(alpha = 0.65, type = 'mesh3d', name = 'pred_surface')
+fig
 plot_ly(x=actbud.sub4$ts_since_rise, y=actbud.sub4$TAIR, z=actbud.sub4$beep_count.y) %>%
   add_lines(color = actbud.sub$TagId) %>%
   layout(scene = list(
     xaxis = list(title = "Time since sunrise"),
     yaxis = list(title = "Air Temperature"),
     zaxis = list(title = "Beep count")))
-    
+##################################
+#decision trees
+sample_data = sample.split(actbud.sub4, SplitRatio = 0.2)
+train_data <- subset(actbud.sub4, sample_data == TRUE)
+test_data <- subset(actbud.sub4, sample_data == FALSE)
+actbud.sub4$beep_count.y<-as.factor(actbud.sub4$beep_count.y)
+model<- ctree(beep_count.y ~ ts_since_rise+ TAIR +RELH, data= train_data, controls = ctree_control(testtype = c("Bonferroni")))
+plot(model)
 
+model2<- ctree(beep_count.y ~ ts_since_rise+ TAIR+ RELH+ WSPD, data= train_data, controls = ctree_control(testtype = c("Bonferroni")))
+plot(model2)
+
+model3<- ctree(beep_count.y ~ ts_since_rise+ DP+ WSPD, data= train_data, controls = ctree_control(testtype = c("Bonferroni")))
+plot(model3)
+
+model4<- ctree(beep_count.y ~ ts_since_rise+ TAIR +RELH+DP+WSPD, data= train_data, controls = ctree_control(testtype = c("Bonferroni")))
+plot(model4)
+
+library(rpart)
+library(rpart.plot)
+fit<- rpart(beep_count.y ~., data = train_data, method = 'class')
+rpart.plot(fit, extra = 106)
 ###################################
 actbud.sub$beep_count.t<-actbud.sub$beep_count +1
 qqp(actbud.sub$beep_count.t, "norm")
